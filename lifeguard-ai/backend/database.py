@@ -1,5 +1,6 @@
 import os
 import ssl
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 raw_url = os.getenv(
@@ -7,20 +8,23 @@ raw_url = os.getenv(
     "postgresql+asyncpg://postgres:postgres@localhost:5432/lifeguard"
 )
 
+# Normalize the scheme to postgresql+asyncpg
 if raw_url.startswith("postgres://"):
     raw_url = raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
 elif raw_url.startswith("postgresql://"):
     raw_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-if "?sslmode=require" in raw_url:
-    DATABASE_URL = raw_url.replace("?sslmode=require", "")
-elif "&sslmode=require" in raw_url:
-    DATABASE_URL = raw_url.replace("&sslmode=require", "")
-else:
-    DATABASE_URL = raw_url
+# Strip sslmode from the URL query parameters (asyncpg doesn't support it as a URL param)
+parsed = urlparse(raw_url)
+query_params = parse_qs(parsed.query)
+query_params.pop("sslmode", None)
+clean_query = urlencode(query_params, doseq=True)
+DATABASE_URL = urlunparse(parsed._replace(query=clean_query))
 
+# Enable SSL for any non-localhost database connection
 connect_args = {}
-if "neon.tech" in DATABASE_URL:
+is_remote = "localhost" not in DATABASE_URL and "127.0.0.1" not in DATABASE_URL
+if is_remote:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE

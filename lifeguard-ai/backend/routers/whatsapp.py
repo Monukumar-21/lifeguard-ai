@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, BackgroundTasks, Depends
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from backend.database import get_db, AsyncSessionLocal
@@ -56,7 +57,7 @@ async def verify_webhook(request: Request):
     
     if mode and token:
         if mode == "subscribe" and token == VERIFY_TOKEN:
-            return int(challenge)
+            return PlainTextResponse(content=challenge)
     return {"status": "error"}
 
 @router.post("/webhook")
