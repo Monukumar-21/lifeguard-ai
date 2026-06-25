@@ -44,4 +44,16 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    import os
+    
+    # Grab the port Railway assigns dynamically, or default to 8000 locally
+    port = int(os.environ.get("PORT", 8000))
+    
+    # Run the server with proxy-headers enabled (Crucial for Railway!)
+    uvicorn.run(
+        "backend.main:app", 
+        host="0.0.0.0", 
+        port=port, 
+        proxy_headers=True, 
+        forwarded_allow_ips="*"
+    )
