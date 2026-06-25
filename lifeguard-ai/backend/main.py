@@ -31,11 +31,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Routers
-app.include_router(whatsapp.router)
-app.include_router(tasks.router)
-app.include_router(goals.router)
-app.include_router(subscriptions.router)
+# Include Routers (all under /api prefix)
+app.include_router(whatsapp.router, prefix="/api")
+app.include_router(tasks.router, prefix="/api")
+app.include_router(goals.router, prefix="/api")
+app.include_router(subscriptions.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
