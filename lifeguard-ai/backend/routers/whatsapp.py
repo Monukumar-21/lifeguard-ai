@@ -1,11 +1,9 @@
-from fastapi import APIRouter, Request, BackgroundTasks, Depends
+from fastapi import APIRouter, Request, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from backend.database import get_db, AsyncSessionLocal
 from backend.models import User, Task, ChatHistory, TaskStatus
-from backend.agents.commitment_extractor import extract_commitment
-from backend.agents.chat_agent import chat_with_agent
 import httpx
 import os
 import uuid
@@ -53,12 +51,16 @@ async def verify_webhook(request: Request):
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
     
-    VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "my_secure_token")
+    # Get the verify token from environment variables (no fallback!)
+    VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
     
-    if mode and token:
-        if mode == "subscribe" and token == VERIFY_TOKEN:
-            return PlainTextResponse(content=challenge)
-    return {"status": "error"}
+    # Check both mode and token validity
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        # Send back the challenge as a plain text response immediately
+        return PlainTextResponse(content=challenge)
+    
+    # If invalid, return a 403 Forbidden (not a 200 JSON)
+    raise HTTPException(status_code=403, detail="Invalid verification token")
 
 @router.post("/webhook")
 async def handle_whatsapp_message(request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
@@ -123,6 +125,10 @@ async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
     Background task to analyze the message, create a task if applicable, 
     and reply to the user.
     """
+    # FIX: Move heavy imports HERE so they don't block the webhook startup
+    from backend.agents.commitment_extractor import extract_commitment
+    from backend.agents.chat_agent import chat_with_agent
+    
     # Process text using the commitment extractor AI
     commitment_data = extract_commitment(text)
     
