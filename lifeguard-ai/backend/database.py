@@ -1,12 +1,30 @@
 import os
+import ssl
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-# The database URL for Neon PostgreSQL using asyncpg
-# Expected format: postgresql+asyncpg://user:password@endpoint/dbname
-DATABASE_URL = os.getenv(
+raw_url = os.getenv(
     "DATABASE_URL", 
     "postgresql+asyncpg://postgres:postgres@localhost:5432/lifeguard"
 )
+
+if raw_url.startswith("postgres://"):
+    raw_url = raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif raw_url.startswith("postgresql://"):
+    raw_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+if "?sslmode=require" in raw_url:
+    DATABASE_URL = raw_url.replace("?sslmode=require", "")
+elif "&sslmode=require" in raw_url:
+    DATABASE_URL = raw_url.replace("&sslmode=require", "")
+else:
+    DATABASE_URL = raw_url
+
+connect_args = {}
+if "neon.tech" in DATABASE_URL:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    connect_args["ssl"] = ctx
 
 # Create the async engine
 engine = create_async_engine(
@@ -15,7 +33,8 @@ engine = create_async_engine(
     future=True,
     pool_size=10,
     max_overflow=20,
-    pool_recycle=1800, # Recycle connections after 30 minutes
+    pool_recycle=1800,
+    connect_args=connect_args
 )
 
 # Create an async session factory

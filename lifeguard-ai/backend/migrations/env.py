@@ -11,7 +11,7 @@ from alembic import context
 # Add root directory to python path to resolve backend module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from backend.database import DATABASE_URL
+from backend.database import DATABASE_URL, connect_args
 from backend.models import Base
 
 # this is the Alembic Config object, which provides
@@ -57,6 +57,7 @@ async def run_async_migrations() -> None:
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:
