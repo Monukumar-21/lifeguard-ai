@@ -25,7 +25,9 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 def get_url():
-    return os.getenv("DATABASE_URL", DATABASE_URL)
+    # Always use the cleaned DATABASE_URL from database.py
+    # (it already reads the env var and strips sslmode for asyncpg compatibility)
+    return DATABASE_URL
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
