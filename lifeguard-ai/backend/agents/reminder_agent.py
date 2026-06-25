@@ -1,5 +1,7 @@
 import os
-import google.generativeai as genai
+import json
+from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 from backend.models import Task, User
@@ -13,10 +15,9 @@ def generate_smart_reminder(task: Task, user: User) -> str:
     It mentions the task name, time remaining, and a suggested next action.
     """
     api_key = os.getenv("GEMINI_API_KEY")
-    if api_key:
-        genai.configure(api_key=api_key)
-        
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    
+    # Initialize the new Google GenAI client
+    client = genai.Client(api_key=api_key)
     
     now = datetime.now(timezone.utc)
     time_remaining_str = "No due date specified"
@@ -52,15 +53,15 @@ def generate_smart_reminder(task: Task, user: User) -> str:
     """
     
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=ReminderMessage,
                 temperature=0.7,
             )
         )
-        import json
         return json.loads(response.text).get("message_text", f"Reminder: *{task.title}* is due soon.")
     except Exception as e:
         print(f"Error generating reminder: {e}")

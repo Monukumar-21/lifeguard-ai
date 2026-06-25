@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.routers import whatsapp, tasks, goals, subscriptions
 from backend.database import engine
+from backend.models import Base
 from backend.scheduler.reminder_scheduler import start_scheduler, stop_scheduler
 from contextlib import asynccontextmanager
 
