@@ -17,7 +17,7 @@ async def send_whatsapp_message(to_number: str, text: str):
     """
     Sends a text message using Meta's Cloud API for WhatsApp.
     """
-    token = os.getenv("WHATSAPP_TOKEN")
+    token = os.getenv("WHATSAPP_API_TOKEN")
     phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
     
     if not token or not phone_number_id:
@@ -53,7 +53,7 @@ async def verify_webhook(request: Request):
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
     
-    VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "my_secure_token")
+    VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN", "my_secure_token")
     
     if mode and token:
         if mode == "subscribe" and token == VERIFY_TOKEN:
