@@ -1,10 +1,9 @@
-from fastapi import APIRouter, Request, BackgroundTasks, Depends, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from backend.database import get_db, AsyncSessionLocal
 from backend.models import User, Task, ChatHistory, TaskStatus
-import httpx
+from twilio.rest import Client
 import os
 import uuid
 from datetime import datetime
@@ -13,111 +12,77 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
 async def send_whatsapp_message(to_number: str, text: str):
     """
-    Sends a text message using Meta's Cloud API for WhatsApp.
+    Sends a WhatsApp text message using Twilio's REST API Client.
     """
-    token = os.getenv("WHATSAPP_API_TOKEN")
-    phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    from_number = os.getenv("TWILIO_WHATSAPP_FROM")  # Example: 'whatsapp:+14155238886'
     
-    if not token or not phone_number_id:
-        print(f"[WHATSAPP MOCK] To {to_number}: {text}")
+    if not account_sid or not auth_token or not from_number:
+        print(f"[TWILIO MOCK] To {to_number}: {text}")
         return
         
-    url = f"https://graph.facebook.com/v17.0/{phone_number_id}/messages"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to_number,
-        "type": "text",
-        "text": {"body": text}
-    }
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            print(f"Message sent to {to_number}")
-        except Exception as e:
-            print(f"Failed to send WhatsApp message: {e}")
-
-@router.get("/webhook")
-async def verify_webhook(request: Request):
-    """
-    Verify the webhook setup with Meta.
-    """
-    mode = request.query_params.get("hub.mode")
-    token = request.query_params.get("hub.verify_token")
-    challenge = request.query_params.get("hub.challenge")
-    
-    # Get the verify token from environment variables (no fallback!)
-    VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
-    
-    # Check both mode and token validity
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        # Send back the challenge as a plain text response immediately
-        return PlainTextResponse(content=challenge)
-    
-    # If invalid, return a 403 Forbidden (not a 200 JSON)
-    raise HTTPException(status_code=403, detail="Invalid verification token")
+    try:
+        # Twilio expects recipient numbers to include the 'whatsapp:' identifier
+        to_formatted = to_number if to_number.startswith("whatsapp:") else f"whatsapp:{to_number}"
+        
+        # Initialize Twilio Client
+        client = Client(account_sid, auth_token)
+        
+        # Send message out-of-band (runs perfectly inside BackgroundTasks)
+        message = client.messages.create(
+            from_=from_number,
+            body=text,
+            to=to_formatted
+        )
+        print(f"Message successfully sent via Twilio to {to_formatted}, SID: {message.sid}")
+    except Exception as e:
+        print(f"Failed to send Twilio WhatsApp message: {e}")
 
 @router.post("/webhook")
-async def handle_whatsapp_message(request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def handle_whatsapp_message(
+    background_tasks: BackgroundTasks, 
+    From: str = Form(...),   # Twilio passes user's number here (e.g., 'whatsapp:+919876543210')
+    Body: str = Form(...),   # Twilio passes message contents here
+    db: AsyncSession = Depends(get_db)
+):
     """
-    Receive incoming messages and process them asynchronously.
+    Receive incoming WhatsApp messages from Twilio via Form data and process asynchronously.
     """
-    body = await request.json()
-    
     try:
-        if 'entry' not in body:
-            return {"status": "ok"}
-            
-        entry = body['entry'][0]
-        changes = entry.get('changes', [])
-        if not changes:
-            return {"status": "ok"}
-            
-        value = changes[0].get('value', {})
+        # 1. Clean the incoming number to match your database's format (e.g., '919876543210')
+        cleaned_number = From.replace("whatsapp:", "").replace("+", "")
+        text_body = Body
         
-        if 'messages' in value:
-            msg = value['messages'][0]
-            from_number = msg.get('from')
+        # 2. Look up user by their cleaned phone number digits
+        result = await db.execute(select(User).where(User.whatsapp_number == cleaned_number))
+        user = result.scalar_one_or_none()
+        
+        if user:
+            # Log raw incoming text to history
+            chat = ChatHistory(user_id=user.id, message=text_body, is_from_user=True, platform="WHATSAPP")
+            db.add(chat)
+            await db.commit()
             
-            # For simplicity, we only handle standard text messages
-            if msg.get('type') != 'text':
-                return {"status": "ok"}
-                
-            text_body = msg['text']['body']
+            # Pass the complete Twilio format 'From' variable forward to ensure replies hit properly
+            background_tasks.add_task(process_message, text_body, user.id, From)
+        else:
+            # Create a fallback profile if user doesn't exist yet
+            new_user = User(clerk_id=str(uuid.uuid4()), whatsapp_number=cleaned_number, name="Unknown User")
+            db.add(new_user)
+            await db.commit()
+            await db.refresh(new_user)
             
-            # Find user by whatsapp number
-            result = await db.execute(select(User).where(User.whatsapp_number == from_number))
-            user = result.scalar_one_or_none()
+            chat = ChatHistory(user_id=new_user.id, message=text_body, is_from_user=True, platform="WHATSAPP")
+            db.add(chat)
+            await db.commit()
             
-            if user:
-                # Log chat history
-                chat = ChatHistory(user_id=user.id, message=text_body, is_from_user=True, platform="WHATSAPP")
-                db.add(chat)
-                await db.commit()
-                
-                # Extract commitments asynchronously
-                background_tasks.add_task(process_message, text_body, user.id, from_number)
-            else:
-                # If user doesn't exist in DB, optionally create them here or reply asking to sign up on web
-                new_user = User(clerk_id=str(uuid.uuid4()), whatsapp_number=from_number, name="Unknown User")
-                db.add(new_user)
-                await db.commit()
-                await db.refresh(new_user)
-                
-                chat = ChatHistory(user_id=new_user.id, message=text_body, is_from_user=True, platform="WHATSAPP")
-                db.add(chat)
-                await db.commit()
-                
-                background_tasks.add_task(process_message, text_body, new_user.id, from_number)
+            background_tasks.add_task(process_message, text_body, new_user.id, From)
                 
     except Exception as e:
-        print(f"Error handling webhook: {e}")
+        print(f"Error handling Twilio webhook incoming payload: {e}")
 
+    # Twilio requires a fast 200 HTTP response to acknowledge receipt
     return {"status": "ok"}
 
 async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
@@ -125,7 +90,6 @@ async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
     Background task to analyze the message, create a task if applicable, 
     and reply to the user.
     """
-    # FIX: Move heavy imports HERE so they don't block the webhook startup
     from backend.agents.commitment_extractor import extract_commitment
     from backend.agents.chat_agent import chat_with_agent
     
@@ -143,7 +107,6 @@ async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
             due_date = None
             if due_date_str:
                 try:
-                    # Convert ISO format like 2026-06-25T17:00:00Z safely
                     due_date = datetime.fromisoformat(due_date_str.replace('Z', '+00:00'))
                 except ValueError:
                     pass
@@ -159,7 +122,6 @@ async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
             await session.commit()
             await session.refresh(new_task)
             
-            # Now we can schedule reminders
             if due_date:
                 from backend.scheduler.reminder_scheduler import schedule_reminders_for_task
                 await schedule_reminders_for_task(new_task.id)
@@ -178,13 +140,12 @@ async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
             session.add(bot_chat)
             await session.commit()
             
-            # Send message via WhatsApp API
+            # Send message via Twilio API
             await send_whatsapp_message(phone_number, response_text)
         else:
             # Handle general chat fallback
             result = await session.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
-            user_name = user.name if user and user.name else "there"
             
             # Fetch recent chat history
             history_result = await session.execute(
@@ -201,5 +162,5 @@ async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
             session.add(bot_chat)
             await session.commit()
             
-            # Send message via WhatsApp API
+            # Send message via Twilio API
             await send_whatsapp_message(phone_number, response_text)
