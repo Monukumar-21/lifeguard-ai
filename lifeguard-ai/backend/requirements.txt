@@ -15,4 +15,3 @@ redis>=4.6.0
 httpx>=0.24.1
 twilio
 python-multipart
-google-generativeai
