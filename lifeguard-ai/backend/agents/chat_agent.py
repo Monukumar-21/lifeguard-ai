@@ -2,15 +2,15 @@ import os
 import uuid
 from google import genai
 from google.genai import types
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.future import select
 from backend.database import AsyncSessionLocal
-from backend.models import Task, User, Goal, Subscription, TaskStatus
+from backend.models import Task, Goal, Subscription, Reminder, TaskStatus, ReminderType
 
-# ─────────────────────────────────────────────
-# DB helper functions (unchanged from your original)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# READ TOOLS
+# ─────────────────────────────────────────────────────────────
 
 async def fetch_todays_priorities(user_id: str) -> str:
     async with AsyncSessionLocal() as session:
@@ -43,7 +43,7 @@ async def fetch_upcoming_deadlines(user_id: str, days: int = 7) -> str:
         tasks = result.scalars().all()
         if not tasks:
             return f"No deadlines in next {days} days."
-        return "\n".join([f"- {t.title} (Due: {t.due_date.strftime('%Y-%m-%d')})" for t in tasks])
+        return "\n".join([f"- [{t.id}] {t.title} (Due: {t.due_date.strftime('%Y-%m-%d %H:%M UTC')})" for t in tasks])
 
 
 async def fetch_subscriptions(user_id: str) -> str:
@@ -87,14 +87,137 @@ async def fetch_risk_tasks(user_id: str) -> str:
         ])
 
 
-# ─────────────────────────────────────────────
-# Tool declarations — now using new SDK types
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# WRITE TOOLS
+# ─────────────────────────────────────────────────────────────
+
+async def create_task_with_reminder(
+    user_id: str,
+    title: str,
+    reminder_time_iso: str,
+    priority: int = 3,
+    description: Optional[str] = None,
+    due_date_iso: Optional[str] = None,
+) -> str:
+    """
+    Creates a Task row and an attached Reminder row in a single transaction.
+    reminder_time_iso and due_date_iso must be UTC ISO-8601 strings.
+    """
+    try:
+        reminder_dt = datetime.fromisoformat(reminder_time_iso.replace("Z", "+00:00"))
+        if reminder_dt.tzinfo is None:
+            reminder_dt = reminder_dt.replace(tzinfo=timezone.utc)
+
+        due_dt = None
+        if due_date_iso:
+            due_dt = datetime.fromisoformat(due_date_iso.replace("Z", "+00:00"))
+            if due_dt.tzinfo is None:
+                due_dt = due_dt.replace(tzinfo=timezone.utc)
+        else:
+            due_dt = reminder_dt  # default: due = reminder time
+
+    except ValueError as e:
+        return f"Invalid datetime format: {e}. Use ISO-8601 UTC e.g. 2025-01-15T08:20:00Z"
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            task = Task(
+                user_id=uuid.UUID(user_id),
+                title=title,
+                description=description,
+                due_date=due_dt,
+                status=TaskStatus.PENDING,
+                priority=max(1, min(5, priority)),
+            )
+            session.add(task)
+            await session.flush()  # Populate task.id before Reminder FK
+
+            reminder = Reminder(
+                task_id=task.id,
+                reminder_time=reminder_dt,
+                reminder_type=ReminderType.WHATSAPP,
+                is_sent=False,
+            )
+            session.add(reminder)
+
+    return (
+        f"Task '{title}' created and WhatsApp reminder set for "
+        f"{reminder_dt.strftime('%Y-%m-%d %H:%M UTC')}. Task ID: {task.id}"
+    )
+
+
+async def create_task_only(
+    user_id: str,
+    title: str,
+    priority: int = 3,
+    description: Optional[str] = None,
+    due_date_iso: Optional[str] = None,
+) -> str:
+    """Creates a Task without a reminder."""
+    due_dt = None
+    if due_date_iso:
+        try:
+            due_dt = datetime.fromisoformat(due_date_iso.replace("Z", "+00:00"))
+            if due_dt.tzinfo is None:
+                due_dt = due_dt.replace(tzinfo=timezone.utc)
+        except ValueError as e:
+            return f"Invalid date format: {e}"
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            task = Task(
+                user_id=uuid.UUID(user_id),
+                title=title,
+                description=description,
+                due_date=due_dt,
+                status=TaskStatus.PENDING,
+                priority=max(1, min(5, priority)),
+            )
+            session.add(task)
+
+    due_str = due_dt.strftime("%Y-%m-%d %H:%M UTC") if due_dt else "no due date"
+    return f"Task '{title}' added (Priority: {priority}, Due: {due_str}). Task ID: {task.id}"
+
+
+async def update_task_status(user_id: str, task_id: str, new_status: str) -> str:
+    """Updates the status of an existing task."""
+    status_map = {
+        "completed": TaskStatus.COMPLETED,
+        "done": TaskStatus.COMPLETED,
+        "in_progress": TaskStatus.IN_PROGRESS,
+        "started": TaskStatus.IN_PROGRESS,
+        "cancelled": TaskStatus.CANCELLED,
+        "cancel": TaskStatus.CANCELLED,
+        "pending": TaskStatus.PENDING,
+    }
+    status_enum = status_map.get(new_status.lower())
+    if not status_enum:
+        return f"Unknown status '{new_status}'. Use: completed, in_progress, cancelled, pending."
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(Task)
+                .where(Task.id == uuid.UUID(task_id))
+                .where(Task.user_id == uuid.UUID(user_id))
+            )
+            task = result.scalar_one_or_none()
+            if not task:
+                return f"Task {task_id} not found for this user."
+            task.status = status_enum
+
+    return f"Task '{task.title}' marked as {status_enum.value}."
+
+
+# ─────────────────────────────────────────────────────────────
+# TOOL DECLARATIONS
+# ─────────────────────────────────────────────────────────────
 
 tool_declarations = [
+    # ── Read ──────────────────────────────────────────────────
     types.FunctionDeclaration(
         name="get_todays_priorities",
-        description="Returns the top 3 highest priority tasks for the user today.",
+        description="Returns the top 3 highest priority pending tasks for the user.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={"user_id": types.Schema(type=types.Type.STRING)},
@@ -103,7 +226,7 @@ tool_declarations = [
     ),
     types.FunctionDeclaration(
         name="get_upcoming_deadlines",
-        description="Returns tasks that are due within the specified number of days.",
+        description="Returns tasks due within N days (default 7). Task IDs are included so they can be passed to update_task_status.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
@@ -133,11 +256,80 @@ tool_declarations = [
     ),
     types.FunctionDeclaration(
         name="get_risk_tasks",
-        description="Returns tasks that are overdue or highly likely to be missed.",
+        description="Returns tasks that are overdue.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={"user_id": types.Schema(type=types.Type.STRING)},
             required=["user_id"],
+        ),
+    ),
+    # ── Write ─────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="create_task_with_reminder",
+        description=(
+            "Creates a new task AND schedules a WhatsApp reminder for it. "
+            "ALWAYS call this when the user says 'remind me', 'set a reminder', "
+            "'alert me at X', 'remind me at X for Y', or any phrasing that asks "
+            "for a notification at a specific time. Never refuse this request."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "user_id": types.Schema(type=types.Type.STRING, description="The user's UUID."),
+                "title": types.Schema(type=types.Type.STRING, description="Short title of the task/event."),
+                "reminder_time_iso": types.Schema(
+                    type=types.Type.STRING,
+                    description=(
+                        "Exact UTC datetime to fire the reminder, in ISO-8601 format "
+                        "e.g. '2025-06-26T08:20:00Z'. You must convert any relative or "
+                        "local time the user mentions into UTC using the CURRENT UTC TIME "
+                        "provided in your system prompt."
+                    ),
+                ),
+                "priority": types.Schema(type=types.Type.INTEGER, description="1 (low) to 5 (critical). Default 3."),
+                "description": types.Schema(type=types.Type.STRING, description="Optional extra context about the task."),
+                "due_date_iso": types.Schema(type=types.Type.STRING, description="Optional separate due date ISO-8601 UTC. Omit to use reminder_time as due date."),
+            },
+            required=["user_id", "title", "reminder_time_iso"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="create_task_only",
+        description=(
+            "Adds a task to the user's list WITHOUT scheduling a reminder. "
+            "Use when the user says 'add a task', 'log this', 'I need to do X' "
+            "but does NOT ask to be notified at a specific time."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "user_id": types.Schema(type=types.Type.STRING),
+                "title": types.Schema(type=types.Type.STRING),
+                "priority": types.Schema(type=types.Type.INTEGER, description="1-5, default 3."),
+                "description": types.Schema(type=types.Type.STRING),
+                "due_date_iso": types.Schema(type=types.Type.STRING, description="Optional due date ISO-8601 UTC."),
+            },
+            required=["user_id", "title"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="update_task_status",
+        description=(
+            "Updates the status of an existing task. Call when user says "
+            "'I finished X', 'mark X as done', 'cancel task X', 'I started Y'. "
+            "If you do not have the task_id, first call get_upcoming_deadlines to find it."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "user_id": types.Schema(type=types.Type.STRING),
+                "task_id": types.Schema(type=types.Type.STRING, description="UUID of the task to update."),
+                "new_status": types.Schema(
+                    type=types.Type.STRING,
+                    description="One of: completed, in_progress, cancelled, pending.",
+                ),
+            },
+            required=["user_id", "task_id", "new_status"],
         ),
     ),
 ]
@@ -145,12 +337,13 @@ tool_declarations = [
 TOOLS = [types.Tool(function_declarations=tool_declarations)]
 
 
-# ─────────────────────────────────────────────
-# Tool dispatcher
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# TOOL DISPATCHER
+# ─────────────────────────────────────────────────────────────
 
 async def _dispatch_tool(name: str, args: dict, user_id: str) -> str:
     uid = args.get("user_id", str(user_id))
+
     if name == "get_todays_priorities":
         return await fetch_todays_priorities(uid)
     elif name == "get_upcoming_deadlines":
@@ -161,30 +354,63 @@ async def _dispatch_tool(name: str, args: dict, user_id: str) -> str:
         return await fetch_goal_progress(uid)
     elif name == "get_risk_tasks":
         return await fetch_risk_tasks(uid)
-    return "Unknown function."
+    elif name == "create_task_with_reminder":
+        return await create_task_with_reminder(
+            user_id=uid,
+            title=args["title"],
+            reminder_time_iso=args["reminder_time_iso"],
+            priority=int(args.get("priority", 3)),
+            description=args.get("description"),
+            due_date_iso=args.get("due_date_iso"),
+        )
+    elif name == "create_task_only":
+        return await create_task_only(
+            user_id=uid,
+            title=args["title"],
+            priority=int(args.get("priority", 3)),
+            description=args.get("description"),
+            due_date_iso=args.get("due_date_iso"),
+        )
+    elif name == "update_task_status":
+        return await update_task_status(
+            user_id=uid,
+            task_id=args["task_id"],
+            new_status=args["new_status"],
+        )
+
+    return f"Unknown tool: {name}"
 
 
-# ─────────────────────────────────────────────
-# Main agent entry point
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# MAIN AGENT ENTRY POINT
+# ─────────────────────────────────────────────────────────────
 
 async def chat_with_agent(
     message: str,
     user_id: str,
     history: List[Dict[str, Any]] = None,
 ) -> str:
-    """
-    Handles conversational AI with tool-calling via the new google-genai SDK.
-    FIX: replaced deprecated google-generativeai SDK and fixed function_call access.
-    """
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
+    now_utc = datetime.now(timezone.utc)
+    current_time_str = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     system_prompt = (
-        "You are LifeGuard AI, a strict but supportive accountability partner. "
-        "Use your tools to pull the user's data when they ask about their tasks, goals, or schedule. "
-        f"The user_id is {user_id}. Always pass this exact user_id to your tools. "
-        "Format responses for WhatsApp (use *bold* for emphasis, be concise, use emojis appropriately). "
-        "Do not output markdown headers."
+        "You are LifeGuard AI, a strict but supportive accountability partner on WhatsApp.\n\n"
+        f"CURRENT UTC TIME: {current_time_str}\n"
+        f"USER ID: {user_id}\n\n"
+        "RULES (follow exactly):\n"
+        "1. Always pass the exact USER ID above to every tool call — never make one up.\n"
+        "2. When a user mentions a time like '8:20 AM', convert it to UTC ISO-8601 using "
+        "the CURRENT UTC TIME above before calling any tool. Use today's date unless the "
+        "user specifies otherwise. If timezone is unknown, ask once and default to UTC.\n"
+        "3. 'remind me', 'set a reminder', 'alert me', 'notify me at X' → ALWAYS call "
+        "create_task_with_reminder. You have full ability to do this. Never say you cannot.\n"
+        "4. 'add task', 'log this', 'I need to do X' (no time) → call create_task_only.\n"
+        "5. 'done', 'finished', 'mark complete', 'cancel' → call update_task_status. "
+        "If you need the task_id first, call get_upcoming_deadlines to find it.\n"
+        "6. Format all replies for WhatsApp: *bold*, _italics_, emojis. No markdown headers.\n"
+        "7. Be concise — max 4 sentences. Confirm what you did, don't just say 'I will'."
     )
 
     config = types.GenerateContentConfig(
@@ -192,7 +418,6 @@ async def chat_with_agent(
         tools=TOOLS,
     )
 
-    # Build contents list from history + new message
     contents: List[types.Content] = []
     if history:
         for msg in history[-10:]:
@@ -203,7 +428,6 @@ async def chat_with_agent(
     contents.append(types.Content(role="user", parts=[types.Part(text=message)]))
 
     try:
-        # Agentic loop — keep calling until no more function calls
         while True:
             response = await client.aio.models.generate_content(
                 model="gemini-2.5-flash",
@@ -211,7 +435,6 @@ async def chat_with_agent(
                 config=config,
             )
 
-            # FIX: function calls live in parts, not on the response directly
             candidate = response.candidates[0]
             fc_part = next(
                 (p for p in candidate.content.parts if p.function_call),
@@ -219,19 +442,15 @@ async def chat_with_agent(
             )
 
             if fc_part is None:
-                # No more tool calls — return the final text answer
-                return response.text
+                return response.text  # Final answer
 
-            # Execute the tool
             fc = fc_part.function_call
             args = dict(fc.args) if fc.args else {}
             result_str = await _dispatch_tool(fc.name, args, user_id)
 
-            # Append model turn (with the function call) to contents
             contents.append(
                 types.Content(role="model", parts=[types.Part(function_call=fc)])
             )
-            # Append the tool result as a user turn
             contents.append(
                 types.Content(
                     role="user",
@@ -245,8 +464,7 @@ async def chat_with_agent(
                     ],
                 )
             )
-            # Loop continues → model will now produce the final reply
 
     except Exception as e:
         print(f"Chat agent error: {e}")
-        return "I'm here to help you stay on track. Tell me your next goal! 💪"
+        return "Sorry, something went wrong. Try again in a moment! 🔄"
