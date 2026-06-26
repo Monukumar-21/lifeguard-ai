@@ -34,7 +34,7 @@ When a WhatsApp notification pops up, it automatically triggers a psychological 
 - **Frontend**: React, TypeScript, Vite, Tailwind CSS, Recharts, Framer Motion
 - **Backend**: Python, FastAPI, SQLAlchemy, Alembic (Asyncpg for PostgreSQL)
 - **AI/LLM**: Google Gemini API
-- **Messaging**: Meta WhatsApp Cloud API
+- **Messaging**: Twilio Cloud API
 - **Caching/Rate Limiting**: Upstash Redis
 
 ## 📂 Project Structure
