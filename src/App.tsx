@@ -214,7 +214,6 @@ export default function App() {
           </div>
           <Button onClick={() => { setIsSignedIn(false); setHasProvidedNumber(false); }} variant="ghost" size="sm" className="w-full text-xs text-slate-400 hover:text-slate-900">Sign Out</Button>
         </div>
-        </div>
       </aside>
 
       {/* Main Content */}
