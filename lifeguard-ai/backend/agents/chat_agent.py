@@ -86,6 +86,20 @@ async def fetch_risk_tasks(user_id: str) -> str:
             for t in tasks
         ])
 
+async def fetch_all_pending_tasks(user_id: str) -> str:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Task)
+            .where(Task.user_id == uuid.UUID(user_id))
+            .where(Task.status == TaskStatus.PENDING)
+            .order_by(Task.created_at.desc())
+            .limit(50)
+        )
+        tasks = result.scalars().all()
+        if not tasks:
+            return "No pending tasks."
+        return "\n".join([f"- [{t.id}] {t.title} (Priority: {t.priority})" for t in tasks])
+
 
 # ─────────────────────────────────────────────────────────────
 # WRITE TOOLS
@@ -263,6 +277,15 @@ tool_declarations = [
             required=["user_id"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="get_all_pending_tasks",
+        description="Returns all pending tasks for the user. Use this when the user asks for a specific task or wants to see their schedule/list of tasks.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={"user_id": types.Schema(type=types.Type.STRING)},
+            required=["user_id"],
+        ),
+    ),
     # ── Write ─────────────────────────────────────────────────
     types.FunctionDeclaration(
         name="create_task_with_reminder",
@@ -354,6 +377,8 @@ async def _dispatch_tool(name: str, args: dict, user_id: str) -> str:
         return await fetch_goal_progress(uid)
     elif name == "get_risk_tasks":
         return await fetch_risk_tasks(uid)
+    elif name == "get_all_pending_tasks":
+        return await fetch_all_pending_tasks(uid)
     elif name == "create_task_with_reminder":
         return await create_task_with_reminder(
             user_id=uid,
@@ -408,9 +433,10 @@ async def chat_with_agent(
         "create_task_with_reminder. You have full ability to do this. Never say you cannot.\n"
         "4. 'add task', 'log this', 'I need to do X' (no time) → call create_task_only.\n"
         "5. 'done', 'finished', 'mark complete', 'cancel' → call update_task_status. "
-        "If you need the task_id first, call get_upcoming_deadlines to find it.\n"
+        "If you need the task_id first, call get_upcoming_deadlines or get_all_pending_tasks to find it.\n"
         "6. Format all replies for WhatsApp: *bold*, _italics_, emojis. No markdown headers.\n"
-        "7. Be concise — max 4 sentences. Confirm what you did, don't just say 'I will'."
+        "7. Be concise — max 4 sentences. Confirm what you did, don't just say 'I will'.\n"
+        "8. If the user asks for their schedule, list of tasks, or a specific task (e.g. 'what is my task 1'), ALWAYS call get_all_pending_tasks to check all tasks."
     )
 
     config = types.GenerateContentConfig(

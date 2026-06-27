@@ -1,5 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.future import select
 from datetime import datetime, timezone, timedelta
 from backend.database import AsyncSessionLocal
@@ -88,7 +89,7 @@ async def schedule_reminders_for_task(task_id: uuid.UUID):
 scheduler = AsyncIOScheduler()
 
 def start_scheduler():
-    scheduler.add_job(process_reminders, CronTrigger(minute="*")) # Runs every minute
+    scheduler.add_job(process_reminders, IntervalTrigger(seconds=10)) # Runs every 10 seconds
     scheduler.start()
     print("Scheduler started!")
 
