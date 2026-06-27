@@ -140,6 +140,83 @@ async def get_all_pending_tasks(user_id: str) -> str:
 
 
 @mcp_server.tool()
+async def get_categorized_tasks(user_id: str) -> str:
+    """Returns tasks categorized into Overdue, Today, and Upcoming."""
+    async with AsyncSessionLocal() as session:
+        now = datetime.now(timezone.utc)
+        today_end = now.replace(hour=23, minute=59, second=59)
+
+        result = await session.execute(
+            select(Task)
+            .where(Task.user_id == uuid.UUID(user_id))
+            .where(Task.status == TaskStatus.PENDING)
+            .order_by(Task.due_date.asc().nulls_last())
+        )
+        tasks = result.scalars().all()
+
+        if not tasks:
+            return "No pending tasks."
+
+        overdue, today, upcoming, no_date = [], [], [], []
+        for t in tasks:
+            if not t.due_date:
+                no_date.append(t)
+            elif t.due_date < now:
+                overdue.append(t)
+            elif t.due_date <= today_end:
+                today.append(t)
+            else:
+                upcoming.append(t)
+
+        out = []
+        if overdue:
+            out.append("🔴 OVERDUE:")
+            out.extend([f"  - [{t.id}] {t.title} (Was due: {t.due_date.strftime('%Y-%m-%d')})" for t in overdue])
+        if today:
+            out.append("🟡 TODAY:")
+            out.extend([f"  - [{t.id}] {t.title} (Due: {t.due_date.strftime('%H:%M UTC')})" for t in today])
+        if upcoming:
+            out.append("🟢 UPCOMING:")
+            out.extend([f"  - [{t.id}] {t.title} (Due: {t.due_date.strftime('%Y-%m-%d')})" for t in upcoming])
+        if no_date:
+            out.append("⚪ NO DUE DATE:")
+            out.extend([f"  - [{t.id}] {t.title}" for t in no_date])
+            
+        return "\n".join(out)
+
+
+@mcp_server.tool()
+async def get_task_by_id(user_id: str, task_id: str) -> str:
+    """Retrieves full details of a specific task by its UUID."""
+    async with AsyncSessionLocal() as session:
+        try:
+            tid = uuid.UUID(task_id)
+        except ValueError:
+            return "Invalid task ID format."
+            
+        result = await session.execute(
+            select(Task)
+            .where(Task.id == tid)
+            .where(Task.user_id == uuid.UUID(user_id))
+        )
+        task = result.scalar_one_or_none()
+        if not task:
+            return f"Task {task_id} not found."
+            
+        due = task.due_date.strftime('%Y-%m-%d %H:%M UTC') if task.due_date else 'None'
+        desc = task.description if task.description else 'None'
+        
+        return (
+            f"Title: {task.title}\n"
+            f"ID: {task.id}\n"
+            f"Status: {task.status.value}\n"
+            f"Priority: {task.priority}\n"
+            f"Due Date: {due}\n"
+            f"Description: {desc}"
+        )
+
+
+@mcp_server.tool()
 async def get_productivity_stats(user_id: str) -> str:
     """Returns productivity statistics: total tasks, completed, pending, overdue, completion rate, weekly progress."""
     async with AsyncSessionLocal() as session:

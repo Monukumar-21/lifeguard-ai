@@ -140,6 +140,27 @@ tool_declarations = [
         ),
     ),
     types.FunctionDeclaration(
+        name="get_categorized_tasks",
+        description="Returns tasks categorized into OVERDUE, TODAY, and UPCOMING. Use this when the user asks to see tasks by dues or category.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={"user_id": types.Schema(type=types.Type.STRING)},
+            required=["user_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="get_task_by_id",
+        description="Retrieves the full details (description, due date, status, priority) of a specific task using its exact UUID. Call this when you already have the task_id and need more info.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "user_id": types.Schema(type=types.Type.STRING),
+                "task_id": types.Schema(type=types.Type.STRING, description="The UUID of the task to retrieve."),
+            },
+            required=["user_id", "task_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
         name="get_productivity_stats",
         description="Returns the user's productivity statistics including total tasks, completed count, pending count, overdue count, completion rate, and tasks completed this week. Call when user asks 'how am I doing', 'my stats', 'my progress', 'productivity report', or similar.",
         parameters=types.Schema(
