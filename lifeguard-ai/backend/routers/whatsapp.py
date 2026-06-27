@@ -86,7 +86,7 @@ async def handle_whatsapp_message(
         await db.commit()
 
         # Process in background so Twilio gets its 200 immediately
-        background_tasks.add_task(process_message, text_body, user.id, From)
+        background_tasks.add_task(process_message, text_body, user.id, From, user.timezone)
 
     except Exception as e:
         print(f"Error in WhatsApp webhook: {e}")
@@ -94,7 +94,7 @@ async def handle_whatsapp_message(
     return {"status": "ok"}
 
 
-async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
+async def process_message(text: str, user_id: uuid.UUID, phone_number: str, user_timezone: str = "UTC"):
     """
     Background task: runs the chat agent and replies to the user.
 
@@ -124,7 +124,7 @@ async def process_message(text: str, user_id: uuid.UUID, phone_number: str):
         ]
 
         # Let the agent decide what to do (chat, create task, set reminder, etc.)
-        response_text = await chat_with_agent(text, str(user_id), history)
+        response_text = await chat_with_agent(text, str(user_id), history, user_timezone)
 
         # Persist the bot reply
         session.add(ChatHistory(

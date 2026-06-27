@@ -6,7 +6,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.future import select
 from backend.database import AsyncSessionLocal
-from backend.models import Task, Goal, Subscription, Reminder, TaskStatus, ReminderType
+from backend.models import Task, Goal, Subscription, Reminder, TaskStatus, ReminderType, User
+import pytz
 
 # ─────────────────────────────────────────────────────────────
 # READ TOOLS
@@ -112,6 +113,7 @@ async def create_task_with_reminder(
     priority: int = 3,
     description: Optional[str] = None,
     due_date_iso: Optional[str] = None,
+    recurring_interval_minutes: Optional[int] = None,
 ) -> str:
     """
     Creates a Task row and an attached Reminder row in a single transaction.
@@ -151,6 +153,7 @@ async def create_task_with_reminder(
                 reminder_time=reminder_dt,
                 reminder_type=ReminderType.WHATSAPP,
                 is_sent=False,
+                recurring_interval_minutes=recurring_interval_minutes,
             )
             session.add(reminder)
 
@@ -221,6 +224,24 @@ async def update_task_status(user_id: str, task_id: str, new_status: str) -> str
             task.status = status_enum
 
     return f"Task '{task.title}' marked as {status_enum.value}."
+
+
+async def update_user_timezone(user_id: str, timezone_str: str) -> str:
+    """Updates the user's timezone."""
+    try:
+        pytz.timezone(timezone_str)
+    except pytz.UnknownTimeZoneError:
+        return f"Unknown timezone: {timezone_str}. Please use a valid IANA timezone like 'Asia/Kolkata' or 'America/New_York'."
+        
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(select(User).where(User.id == uuid.UUID(user_id)))
+            user = result.scalar_one_or_none()
+            if not user:
+                return f"User {user_id} not found."
+            user.timezone = timezone_str
+    
+    return f"Timezone successfully updated to {timezone_str}."
 
 
 # ─────────────────────────────────────────────────────────────
@@ -312,6 +333,7 @@ tool_declarations = [
                 "priority": types.Schema(type=types.Type.INTEGER, description="1 (low) to 5 (critical). Default 3."),
                 "description": types.Schema(type=types.Type.STRING, description="Optional extra context about the task."),
                 "due_date_iso": types.Schema(type=types.Type.STRING, description="Optional separate due date ISO-8601 UTC. Omit to use reminder_time as due date."),
+                "recurring_interval_minutes": types.Schema(type=types.Type.INTEGER, description="Optional recurrence interval in minutes. MUST be at least 60 (1 hour)."),
             },
             required=["user_id", "title", "reminder_time_iso"],
         ),
@@ -355,6 +377,18 @@ tool_declarations = [
             required=["user_id", "task_id", "new_status"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="update_user_timezone",
+        description="Updates the user's timezone. Call this when the user says they are in a specific country/city or want to change their timezone. Pass a valid IANA timezone string like 'Asia/Kolkata'.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "user_id": types.Schema(type=types.Type.STRING),
+                "timezone_str": types.Schema(type=types.Type.STRING, description="Valid IANA timezone string (e.g., 'America/New_York', 'Asia/Kolkata')."),
+            },
+            required=["user_id", "timezone_str"],
+        ),
+    ),
 ]
 
 TOOLS = [types.Tool(function_declarations=tool_declarations)]
@@ -387,6 +421,7 @@ async def _dispatch_tool(name: str, args: dict, user_id: str) -> str:
             priority=int(args.get("priority", 3)),
             description=args.get("description"),
             due_date_iso=args.get("due_date_iso"),
+            recurring_interval_minutes=args.get("recurring_interval_minutes"),
         )
     elif name == "create_task_only":
         return await create_task_only(
@@ -402,6 +437,11 @@ async def _dispatch_tool(name: str, args: dict, user_id: str) -> str:
             task_id=args["task_id"],
             new_status=args["new_status"],
         )
+    elif name == "update_user_timezone":
+        return await update_user_timezone(
+            user_id=uid,
+            timezone_str=args["timezone_str"],
+        )
 
     return f"Unknown tool: {name}"
 
@@ -414,21 +454,28 @@ async def chat_with_agent(
     message: str,
     user_id: str,
     history: List[Dict[str, Any]] = None,
+    user_timezone: str = "UTC"
 ) -> str:
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
     now_utc = datetime.now(timezone.utc)
     current_time_str = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    try:
+        tz = pytz.timezone(user_timezone)
+        local_time = now_utc.astimezone(tz)
+        local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S %Z (UTC%z)")
+    except Exception:
+        local_time_str = current_time_str
 
     system_prompt = (
         "You are LifeGuard AI, a strict but supportive accountability partner on WhatsApp.\n\n"
         f"CURRENT UTC TIME: {current_time_str}\n"
+        f"USER LOCAL TIME: {local_time_str} (Timezone: {user_timezone})\n"
         f"USER ID: {user_id}\n\n"
         "RULES (follow exactly):\n"
         "1. Always pass the exact USER ID above to every tool call — never make one up.\n"
-        "2. When a user mentions a time like '8:20 AM', convert it to UTC ISO-8601 using "
-        "the CURRENT UTC TIME above before calling any tool. Use today's date unless the "
-        "user specifies otherwise. If timezone is unknown, ask once and default to UTC.\n"
+        "2. When calculating reminder times (e.g. 'in 10 minutes' or 'at 9:02 AM'), ALWAYS use the CURRENT UTC TIME or USER LOCAL TIME to compute the exact absolute UTC datetime in ISO-8601 format to pass to tools. DO NOT ask for their timezone unless it's necessary and they haven't provided enough info to deduce it.\n"
         "3. 'remind me', 'set a reminder', 'alert me', 'notify me at X' → ALWAYS call "
         "create_task_with_reminder. You have full ability to do this. Never say you cannot.\n"
         "4. 'add task', 'log this', 'I need to do X' (no time) → call create_task_only.\n"
@@ -436,7 +483,8 @@ async def chat_with_agent(
         "If you need the task_id first, call get_upcoming_deadlines or get_all_pending_tasks to find it.\n"
         "6. Format all replies for WhatsApp: *bold*, _italics_, emojis. No markdown headers.\n"
         "7. Be concise — max 4 sentences. Confirm what you did, don't just say 'I will'.\n"
-        "8. If the user asks for their schedule, list of tasks, or a specific task (e.g. 'what is my task 1'), ALWAYS call get_all_pending_tasks to check all tasks."
+        "8. If the user asks for their schedule, list of tasks, or a specific task (e.g. 'what is my task 1'), ALWAYS call get_all_pending_tasks to check all tasks.\n"
+        "9. If the user asks for a recurring reminder (e.g. 'every 1 hr'), set `recurring_interval_minutes`. The MINIMUM limit is 60 minutes (1 hour). If they ask for a recurrence less than 1 hour (e.g. 30 mins), refuse and state clearly that the minimum allowed recurring interval is 1 hour."
     )
 
     config = types.GenerateContentConfig(

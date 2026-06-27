@@ -33,8 +33,13 @@ async def process_reminders():
                 
                 await send_whatsapp_message(user.whatsapp_number, msg)
                 
-                # Mark as sent
-                reminder.is_sent = True
+                # Mark as sent or schedule next recurrence
+                if getattr(reminder, 'recurring_interval_minutes', None):
+                    # Advance until it is in the future
+                    while reminder.reminder_time <= now:
+                        reminder.reminder_time += timedelta(minutes=reminder.recurring_interval_minutes)
+                else:
+                    reminder.is_sent = True
                 
         if reminders:
             await session.commit()

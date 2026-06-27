@@ -11,7 +11,9 @@ async def lifespan(app: FastAPI):
     # Create tables if they don't exist (For dev/hackathon purposes)
     # In production, use Alembic migrations instead
     async with engine.begin() as conn:
-        # await conn.run_sync(Base.metadata.drop_all)
+        import os
+        if os.getenv("RESET_DB") == "true":
+            await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     
     # Start APScheduler

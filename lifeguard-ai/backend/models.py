@@ -117,6 +117,7 @@ class Reminder(Base):
     reminder_time = Column(DateTime(timezone=True), nullable=False)
     reminder_type = Column(Enum(ReminderType), default=ReminderType.WHATSAPP)
     is_sent = Column(Boolean, default=False)
+    recurring_interval_minutes = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
