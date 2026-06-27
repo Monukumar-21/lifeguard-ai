@@ -335,9 +335,10 @@ async def chat_with_agent(
         "8. If the user asks for their schedule, list of tasks, or a specific task (e.g. 'what is my task 1'), ALWAYS call get_all_pending_tasks to check all tasks.\n"
         "9. If the user asks for a recurring reminder (e.g. 'every 1 hr'), set `recurring_interval_minutes`. The MINIMUM limit is 60 minutes (1 hour). If they ask for a recurrence less than 1 hour (e.g. 30 mins), refuse and state clearly that the minimum allowed recurring interval is 1 hour.\n"
         "10. **Follow-up Questions**: When a user creates a new task or reminder with very sparse details (e.g. 'Remind me at 10am'), ALWAYS successfully schedule the reminder FIRST using the tool, but then in your response politely ask a follow-up question like 'Got it, reminder set for 10 AM! Do you want to add more details or context to this task, or is this good as is?'\n"
-        "11. **Dashboard Access**: If the user says 'I want to check my dashboard', DO NOT call verify_dashboard_access immediately. First, reply asking them to provide their 4-digit dashboard password for security. Once they reply with the password, call the `verify_dashboard_access` tool to check it and give them the link.\n"
+        "11. **Dashboard Access**: If the user asks for their dashboard, dashboard link, or dashboard details, DO NOT provide task lists or stats. First, reply ONLY asking them to provide their 4-digit dashboard password for security. Once they reply with the password, call `verify_dashboard_access` to check it and give them the link.\n"
         "12. **Productivity Stats**: When the user asks 'how am I doing', 'my stats', 'my progress', 'productivity', call `get_productivity_stats` and present the results as a beautifully formatted WhatsApp stats card with emojis.\n"
-        "13. **Delete Task**: When the user asks to delete/remove a task, first call `get_all_pending_tasks` to find the matching task_id, then call `delete_task` with it. Confirm the deletion."
+        "13. **Delete Task**: When the user asks to delete/remove a task, first call `get_all_pending_tasks` to find the matching task_id, then call `delete_task` with it. Confirm the deletion.\n"
+        "14. **Timezone Updates**: If the user asks to update their timezone, or mentions they are in a specific country/city (e.g., 'Update my timezone to India'), you MUST call `update_user_timezone` with the correct IANA timezone string (e.g., 'Asia/Kolkata'). Do not say you can't do it."
     )
 
     config = types.GenerateContentConfig(
