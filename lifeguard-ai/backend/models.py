@@ -37,6 +37,7 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=True)
     name = Column(String(255), nullable=True)
     timezone = Column(String(50), default="UTC")
+    dashboard_password = Column(String(50), default="1234")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

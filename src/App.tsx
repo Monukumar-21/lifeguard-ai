@@ -136,8 +136,27 @@ export default function App() {
               onChange={(e) => setPhoneInput(e.target.value)}
               className="flex h-10 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900"
             />
-            <Button onClick={() => setHasProvidedNumber(true)} className="w-full bg-slate-900 text-white hover:bg-slate-800">
-              Connect & Start
+            <Button 
+              onClick={async () => {
+                const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+                try {
+                  setLoading(true);
+                  await fetch(`${API_URL}/whatsapp/connect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ whatsapp_number: phoneInput, password: "1234" })
+                  });
+                } catch (e) {
+                  console.error("Failed to connect whatsapp", e);
+                } finally {
+                  setLoading(false);
+                  setHasProvidedNumber(true);
+                }
+              }} 
+              className="w-full bg-slate-900 text-white hover:bg-slate-800"
+              disabled={loading}
+            >
+              {loading ? "Connecting..." : "Connect & Start"}
             </Button>
           </CardContent>
         </Card>

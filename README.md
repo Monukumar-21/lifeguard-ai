@@ -23,10 +23,11 @@ When a WhatsApp notification pops up, it automatically triggers a psychological 
 ## ✨ Features
 
 - **Proactive WhatsApp Agent**: Get nudged about your upcoming deadlines and priorities directly on WhatsApp.
-- **Conversational Task Management**: Add tasks, schedule events, and check off items just by texting in natural language.
+- **Conversational Task Management**: Add tasks, schedule events, and check off items just by texting in natural language. The agent will proactively ask follow-up questions to ensure all details are captured.
 - **Smart Priority Management**: AI helps sort and track your most critical tasks.
 - **Goal Tracking**: Keep track of long-term goals and progress.
-- **WhatsApp-First Onboarding**: Users sign in via the web dashboard, provide their phone number, and are immediately handed off to the WhatsApp agent. After initial setup, users can manage everything seamlessly via WhatsApp without returning to the website.
+- **WhatsApp-First Onboarding**: Users sign in via the web dashboard, provide their phone number, and are instantly greeted by the bot on WhatsApp.
+- **Secure WhatsApp Dashboard Access**: Users can say "I want to check my dashboard" on WhatsApp, verify their password with the AI, and receive a secure magic link to view their data.
 - **Tiered Subscription Plans**: 
   - **Free Tier**: Limited to 10 messages/day.
   - **Premium Tier (₹50)**: Unlimited AI messages, advanced scheduling, and no rate limits.

@@ -8,8 +8,48 @@ import os
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import func
+from sqlalchemy import func
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
+
+class ConnectRequest(BaseModel):
+    whatsapp_number: str
+    password: str = "1234"
+
+@router.post("/connect")
+async def connect_whatsapp(req: ConnectRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    cleaned_number = req.whatsapp_number.replace("whatsapp:", "").replace("+", "").strip()
+    result = await db.execute(select(User).where(User.whatsapp_number == cleaned_number))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        user = User(
+            clerk_id=str(uuid.uuid4()),
+            whatsapp_number=cleaned_number,
+            name="New User",
+            dashboard_password=req.password
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    else:
+        user.dashboard_password = req.password
+        await db.commit()
+
+    intro_msg = (
+        "👋 Hello! I am *LifeGuard AI*, your personal accountability partner.\n\n"
+        "I'm here to help you crush your goals, stay on top of tasks, and remind you of important events.\n\n"
+        "Here's what I can do:\n"
+        "✅ *Manage Tasks*: 'Remind me to call John at 5 PM'\n"
+        "🔁 *Recurring*: 'Remind me to drink water every 1 hour'\n"
+        "📊 *Dashboard Access*: Say 'I want to check my dashboard' anytime.\n\n"
+        "Let's get started! What's your first priority for today?"
+    )
+    
+    background_tasks.add_task(send_whatsapp_message, cleaned_number, intro_msg)
+    
+    return {"status": "success", "user_id": str(user.id)}
 
 
 async def send_whatsapp_message(to_number: str, text: str):

@@ -244,6 +244,20 @@ async def update_user_timezone(user_id: str, timezone_str: str) -> str:
     return f"Timezone successfully updated to {timezone_str}."
 
 
+async def verify_dashboard_access(user_id: str, password: str) -> str:
+    """Verifies the dashboard password and returns a link if correct."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.id == uuid.UUID(user_id)))
+        user = result.scalar_one_or_none()
+        if not user:
+            return "User not found."
+        
+        if getattr(user, 'dashboard_password', None) == password:
+            return "SUCCESS. Dashboard Access Verified. Tell the user they can access their dashboard at: https://lifeguard-ai-frontend.vercel.app/ (Hackathon Demo Link). Inform them that their phone number acts as their primary identity."
+        else:
+            return "INCORRECT PASSWORD. Access denied."
+
+
 # ─────────────────────────────────────────────────────────────
 # TOOL DECLARATIONS
 # ─────────────────────────────────────────────────────────────
@@ -389,6 +403,18 @@ tool_declarations = [
             required=["user_id", "timezone_str"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="verify_dashboard_access",
+        description="Call this ONLY after the user provides their password when they ask to check their dashboard.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "user_id": types.Schema(type=types.Type.STRING),
+                "password": types.Schema(type=types.Type.STRING, description="The password provided by the user."),
+            },
+            required=["user_id", "password"],
+        ),
+    ),
 ]
 
 TOOLS = [types.Tool(function_declarations=tool_declarations)]
@@ -442,6 +468,11 @@ async def _dispatch_tool(name: str, args: dict, user_id: str) -> str:
             user_id=uid,
             timezone_str=args["timezone_str"],
         )
+    elif name == "verify_dashboard_access":
+        return await verify_dashboard_access(
+            user_id=uid,
+            password=args["password"],
+        )
 
     return f"Unknown tool: {name}"
 
@@ -484,7 +515,9 @@ async def chat_with_agent(
         "6. Format all replies for WhatsApp: *bold*, _italics_, emojis. No markdown headers.\n"
         "7. Be concise — max 4 sentences. Confirm what you did, don't just say 'I will'.\n"
         "8. If the user asks for their schedule, list of tasks, or a specific task (e.g. 'what is my task 1'), ALWAYS call get_all_pending_tasks to check all tasks.\n"
-        "9. If the user asks for a recurring reminder (e.g. 'every 1 hr'), set `recurring_interval_minutes`. The MINIMUM limit is 60 minutes (1 hour). If they ask for a recurrence less than 1 hour (e.g. 30 mins), refuse and state clearly that the minimum allowed recurring interval is 1 hour."
+        "9. If the user asks for a recurring reminder (e.g. 'every 1 hr'), set `recurring_interval_minutes`. The MINIMUM limit is 60 minutes (1 hour). If they ask for a recurrence less than 1 hour (e.g. 30 mins), refuse and state clearly that the minimum allowed recurring interval is 1 hour.\n"
+        "10. **Follow-up Questions**: When a user creates a new task or reminder with very sparse details (e.g. 'Remind me at 10am'), ALWAYS successfully schedule the reminder FIRST using the tool, but then in your response politely ask a follow-up question like 'Got it, reminder set for 10 AM! Do you want to add more details or context to this task, or is this good as is?'\n"
+        "11. **Dashboard Access**: If the user says 'I want to check my dashboard', DO NOT call verify_dashboard_access immediately. First, reply asking them to provide their 4-digit dashboard password for security. Once they reply with the password, call the `verify_dashboard_access` tool to check it and give them the link."
     )
 
     config = types.GenerateContentConfig(
