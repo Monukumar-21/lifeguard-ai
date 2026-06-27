@@ -15,3 +15,5 @@ redis>=4.6.0
 httpx>=0.24.1
 twilio
 python-multipart
+pytz
+mcp[cli]>=1.0.0,<2

@@ -8,7 +8,6 @@ import os
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import func
-from sqlalchemy import func
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])

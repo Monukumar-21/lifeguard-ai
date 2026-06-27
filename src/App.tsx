@@ -65,6 +65,7 @@ export default function App() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [hasProvidedNumber, setHasProvidedNumber] = useState(false);
   const [phoneInput, setPhoneInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,22 +130,35 @@ export default function App() {
             <CardDescription>Enter your WhatsApp number to start receiving AI coaching and reminders. No need to visit the app again!</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <input 
-              type="text" 
-              placeholder="+91 98765 43210" 
-              value={phoneInput}
-              onChange={(e) => setPhoneInput(e.target.value)}
-              className="flex h-10 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900"
-            />
+            <div className="space-y-3">
+              <input 
+                type="text" 
+                placeholder="+91 98765 43210" 
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900"
+              />
+              <input 
+                type="password" 
+                placeholder="Create a 4-digit PIN (e.g. 1234)" 
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900"
+              />
+            </div>
             <Button 
               onClick={async () => {
+                if (!phoneInput || !passwordInput) {
+                  alert("Please provide both phone number and a PIN.");
+                  return;
+                }
                 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
                 try {
                   setLoading(true);
                   await fetch(`${API_URL}/whatsapp/connect`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ whatsapp_number: phoneInput, password: "1234" })
+                    body: JSON.stringify({ whatsapp_number: phoneInput, password: passwordInput })
                   });
                 } catch (e) {
                   console.error("Failed to connect whatsapp", e);
@@ -174,17 +188,32 @@ export default function App() {
             <span>LifeGuard AI</span>
           </div>
           <nav className="space-y-1">
-            <a href="#" className="flex items-center gap-3 px-3 py-2 bg-slate-50 text-slate-900 rounded-lg font-medium text-sm">
+            <a href="#" className="flex items-center gap-3 px-3 py-2 bg-slate-100 text-slate-900 rounded-lg font-medium text-sm">
               <LayoutDashboard className="w-4 h-4" /> Dashboard
+            </a>
+            <a href="#" className="flex items-center gap-3 px-3 py-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg font-medium text-sm transition-colors">
+              <ListTodo className="w-4 h-4" /> Tasks
+            </a>
+            <a href="#" className="flex items-center gap-3 px-3 py-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg font-medium text-sm transition-colors">
+              <Target className="w-4 h-4" /> Goals
+            </a>
+            <a href="#" className="flex items-center gap-3 px-3 py-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg font-medium text-sm transition-colors">
+              <CreditCard className="w-4 h-4" /> Billing
             </a>
           </nav>
         </div>
-        <div className="mt-auto p-6">
+        <div className="mt-auto p-6 space-y-3">
+          <div className="bg-amber-50 border border-amber-100 p-3 rounded-xl text-center">
+            <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider">Free Plan</p>
+            <p className="text-[10px] text-amber-600 mt-0.5">10 messages / day</p>
+          </div>
           <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
             <h4 className="text-sm font-semibold text-slate-900 mb-1">Upgrade to Premium</h4>
             <p className="text-xs text-slate-500 mb-3">Unlimited AI messages for ₹50.</p>
-            <Button onClick={() => alert("Premium feature is in progress")} variant="outline" size="sm" className="w-full text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 hover:text-white border-0">Upgrade Now</Button>
+            <Button onClick={() => alert("\u2728 Premium feature is in progress!\n\nThis will unlock:\n\u2022 Unlimited WhatsApp messages\n\u2022 Priority AI responses\n\u2022 Advanced analytics\n\nComing soon!")} variant="outline" size="sm" className="w-full text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 hover:text-white border-0">Upgrade Now</Button>
           </div>
+          <Button onClick={() => { setIsSignedIn(false); setHasProvidedNumber(false); }} variant="ghost" size="sm" className="w-full text-xs text-slate-400 hover:text-slate-900">Sign Out</Button>
+        </div>
         </div>
       </aside>
 

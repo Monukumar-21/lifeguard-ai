@@ -2,9 +2,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.future import select
+from sqlalchemy import func as sa_func
 from datetime import datetime, timezone, timedelta
 from backend.database import AsyncSessionLocal
-from backend.models import Reminder, Task, User, ReminderType
+from backend.models import Reminder, Task, User, ReminderType, TaskStatus
 from backend.agents.reminder_agent import generate_smart_reminder
 from backend.routers.whatsapp import send_whatsapp_message
 import uuid
@@ -43,6 +44,104 @@ async def process_reminders():
                 
         if reminders:
             await session.commit()
+
+
+async def daily_morning_briefing():
+    """
+    Sends a proactive morning summary to every user at 8 AM UTC.
+    Includes today's pending tasks, overdue count, and a motivational nudge.
+    """
+    now = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as session:
+        users_result = await session.execute(
+            select(User).where(User.whatsapp_number.isnot(None))
+        )
+        users = users_result.scalars().all()
+
+        for user in users:
+            try:
+                # Pending tasks
+                pending_res = await session.execute(
+                    select(Task)
+                    .where(Task.user_id == user.id)
+                    .where(Task.status == TaskStatus.PENDING)
+                    .order_by(Task.priority.desc())
+                    .limit(5)
+                )
+                pending_tasks = pending_res.scalars().all()
+
+                # Overdue count
+                overdue_res = await session.execute(
+                    select(sa_func.count(Task.id)).where(
+                        Task.user_id == user.id,
+                        Task.status == TaskStatus.PENDING,
+                        Task.due_date.isnot(None),
+                        Task.due_date < now,
+                    )
+                )
+                overdue_count = overdue_res.scalar() or 0
+
+                user_name = user.name if user.name and user.name != "Unknown User" else "there"
+
+                if not pending_tasks and overdue_count == 0:
+                    continue  # Nothing to report
+
+                lines = [f"\U0001f305 *Good Morning, {user_name}!*\n"]
+
+                if overdue_count > 0:
+                    lines.append(f"\u26a0\ufe0f You have *{overdue_count} overdue* task(s). Let's tackle those first!\n")
+
+                if pending_tasks:
+                    lines.append("\U0001f4cb *Today's Focus:*")
+                    for i, t in enumerate(pending_tasks, 1):
+                        priority_emoji = "\U0001f534" if t.priority >= 4 else "\U0001f7e1" if t.priority >= 3 else "\U0001f7e2"
+                        lines.append(f"  {priority_emoji} {i}. {t.title}")
+
+                lines.append("\n\U0001f4aa _Reply to me anytime to manage your tasks. You got this!_")
+
+                msg = "\n".join(lines)
+                await send_whatsapp_message(user.whatsapp_number, msg)
+            except Exception as e:
+                print(f"Error sending morning briefing to {user.id}: {e}")
+
+
+async def nudge_overdue_tasks():
+    """
+    Sends a nudge for tasks that are overdue. Runs every 6 hours.
+    Only nudges for tasks overdue by more than 1 hour to avoid spam right at deadline.
+    """
+    now = datetime.now(timezone.utc)
+    overdue_threshold = now - timedelta(hours=1)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Task, User)
+            .join(User, Task.user_id == User.id)
+            .where(Task.status == TaskStatus.PENDING)
+            .where(Task.due_date.isnot(None))
+            .where(Task.due_date < overdue_threshold)
+            .limit(50)
+        )
+        overdue_items = result.all()
+
+        # Group by user
+        user_tasks: dict = {}
+        for task, user in overdue_items:
+            if user.whatsapp_number:
+                user_tasks.setdefault(user.whatsapp_number, {"name": user.name or "there", "tasks": []})
+                user_tasks[user.whatsapp_number]["tasks"].append(task.title)
+
+        for phone, data in user_tasks.items():
+            count = len(data["tasks"])
+            task_list = "\n".join([f"  \u2022 {t}" for t in data["tasks"][:5]])
+            msg = (
+                f"\u23f0 *Overdue Alert, {data['name']}!*\n\n"
+                f"You have *{count}* overdue task(s):\n{task_list}\n\n"
+                f"_Reply 'done [task name]' to mark complete, or 'delete [task name]' to remove._"
+            )
+            await send_whatsapp_message(phone, msg)
+
 
 async def schedule_reminders_for_task(task_id: uuid.UUID):
     """
@@ -94,9 +193,14 @@ async def schedule_reminders_for_task(task_id: uuid.UUID):
 scheduler = AsyncIOScheduler()
 
 def start_scheduler():
-    scheduler.add_job(process_reminders, IntervalTrigger(seconds=10)) # Runs every 10 seconds
+    # Core reminder checker — every 10 seconds
+    scheduler.add_job(process_reminders, IntervalTrigger(seconds=10))
+    # Daily morning briefing — 8 AM UTC (1:30 PM IST)
+    scheduler.add_job(daily_morning_briefing, CronTrigger(hour=8, minute=0))
+    # Overdue nudger — every 6 hours
+    scheduler.add_job(nudge_overdue_tasks, IntervalTrigger(hours=6))
     scheduler.start()
-    print("Scheduler started!")
+    print("Scheduler started! (reminders: 10s, briefing: 8AM UTC, nudges: 6h)")
 
 def stop_scheduler():
     scheduler.shutdown()
