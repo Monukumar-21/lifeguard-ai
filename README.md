@@ -26,6 +26,11 @@ When a WhatsApp notification pops up, it automatically triggers a psychological 
 - **Conversational Task Management**: Add tasks, schedule events, and check off items just by texting in natural language.
 - **Smart Priority Management**: AI helps sort and track your most critical tasks.
 - **Goal Tracking**: Keep track of long-term goals and progress.
+- **WhatsApp-First Onboarding**: Users sign in via the web dashboard, provide their phone number, and are immediately handed off to the WhatsApp agent. After initial setup, users can manage everything seamlessly via WhatsApp without returning to the website.
+- **Tiered Subscription Plans**: 
+  - **Free Tier**: Limited to 10 messages/day.
+  - **Premium Tier (₹50)**: Unlimited AI messages, advanced scheduling, and no rate limits.
+- **Smart Recurring Reminders**: Ability to set exact recurring notifications (e.g. "every 1 hour") via WhatsApp.
 - **Modern Dashboard**: A clean, responsive React-based dashboard to visualize your week and priorities when you need a macro view.
 - **Subscription Management**: Track your recurring subscriptions.
 
@@ -89,15 +94,20 @@ When a WhatsApp notification pops up, it automatically triggers a psychological 
 
 ## 🔮 Future Scope (The Master Plan)
 
-- **WhatsApp-First Onboarding**: Implement a frictionless registration process where the user signs in via the web dashboard, verifies their phone number, and is immediately handed off to the WhatsApp agent. After this initial setup, the user *never* has to visit the website for daily task updates—everything is handled seamlessly via WhatsApp.
 - **Dedicated Views for Tasks, Goals, and Subscriptions**: Implement detailed standalone pages for managing individual tasks, deeper goal tracking progress, and comprehensive subscription management interfaces for power users who want deep analytics.
-- **Tiered Subscription Plans**: 
-  - **Free Tier**: Limited number of task schedules and basic accountability nudges.
-  - **Premium Tier**: Unlimited task scheduling, advanced goal tracking, deeper Gemini AI insights, and custom nudge frequencies.
+- **Webhooks for Subscriptions**: Integrate Stripe webhooks to automatically activate the premium tier upon successful payment.
 
 ## ☁️ Deployment
 
 We have included configurations to easily deploy this stack:
-- **Backend**: Ready to be deployed on [Railway](https://railway.app/) using the provided `Dockerfile` and `railway.json`.
-- **Frontend**: Ready to be deployed on [Vercel](https://vercel.com/) using the provided `vercel.json` (Vite framework).
+
+### 1. Deploying the Backend (Railway)
+- The backend is ready to be deployed on [Railway](https://railway.app/) using the provided `Dockerfile` and `railway.json`.
+- When deploying, ensure you set your environment variables (like `GEMINI_API_KEY`, `DATABASE_URL`, Twilio credentials).
+- *Note:* If you need to reset your schema or apply our new columns in the building phase, set `RESET_DB=true` in Railway variables for one deployment, then remove it.
+
+### 2. Deploying the Frontend (Vercel)
+- The frontend is built with Vite and ready to be deployed on [Vercel](https://vercel.com/) using the provided `vercel.json`.
+- **Connecting to the Backend:** When deploying to Vercel, you must set an Environment Variable named `VITE_API_URL`. Set this to the public URL of your deployed Railway backend (e.g., `https://lifeguard-backend-production.up.railway.app`).
+- Vercel will automatically build the app and connect all API calls to your live backend.
 

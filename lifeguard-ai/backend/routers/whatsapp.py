@@ -2,10 +2,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from backend.database import get_db, AsyncSessionLocal
-from backend.models import User, ChatHistory
+from backend.models import User, ChatHistory, Subscription, SubscriptionStatus
 from twilio.rest import Client
 import os
 import uuid
+from datetime import datetime, timezone
+from sqlalchemy import func
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
@@ -75,6 +77,32 @@ async def handle_whatsapp_message(
             db.add(user)
             await db.commit()
             await db.refresh(user)
+
+        # Check rate limits for non-premium users
+        now_utc = datetime.now(timezone.utc)
+        today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        sub_result = await db.execute(
+            select(Subscription).where(
+                Subscription.user_id == user.id,
+                Subscription.status == SubscriptionStatus.ACTIVE,
+                Subscription.plan_id == "premium"
+            )
+        )
+        has_premium = sub_result.scalar_one_or_none() is not None
+
+        if not has_premium:
+            count_result = await db.execute(
+                select(func.count(ChatHistory.id)).where(
+                    ChatHistory.user_id == user.id,
+                    ChatHistory.is_from_user == True,
+                    ChatHistory.created_at >= today_start
+                )
+            )
+            msg_count = count_result.scalar() or 0
+            if msg_count >= 10:  # Set limit to 10 for normal plan
+                await send_whatsapp_message(From, "⏳ You've reached your free daily limit of 10 messages.\n\n🌟 Upgrade to our Premium Plan for just ₹50 to unlock unlimited messages and advanced AI coaching! Visit the dashboard to upgrade.")
+                return {"status": "rate_limited"}
 
         # Log the incoming message
         db.add(ChatHistory(

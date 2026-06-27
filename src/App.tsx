@@ -62,6 +62,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function App() {
+  const [isSignedIn, setIsSignedIn] = useState(false);
+  const [hasProvidedNumber, setHasProvidedNumber] = useState(false);
+  const [phoneInput, setPhoneInput] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,7 +98,52 @@ export default function App() {
       }
     }
     loadData();
-  }, []);
+  }, [isSignedIn, hasProvidedNumber]);
+
+  if (!isSignedIn) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans">
+        <Card className="w-[400px] shadow-sm border-slate-200">
+          <CardHeader className="text-center">
+            <Activity className="w-12 h-12 mx-auto text-slate-900 mb-2" />
+            <CardTitle className="text-2xl font-bold">LifeGuard AI</CardTitle>
+            <CardDescription>Your personal AI accountability partner.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button onClick={() => setIsSignedIn(true)} className="w-full bg-slate-900 text-white hover:bg-slate-800">
+              Sign In to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!hasProvidedNumber) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans">
+        <Card className="w-[400px] shadow-sm border-slate-200">
+          <CardHeader className="text-center">
+            <MessageCircle className="w-12 h-12 mx-auto text-slate-900 mb-2" />
+            <CardTitle className="text-xl font-bold">Connect WhatsApp</CardTitle>
+            <CardDescription>Enter your WhatsApp number to start receiving AI coaching and reminders. No need to visit the app again!</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <input 
+              type="text" 
+              placeholder="+91 98765 43210" 
+              value={phoneInput}
+              onChange={(e) => setPhoneInput(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900"
+            />
+            <Button onClick={() => setHasProvidedNumber(true)} className="w-full bg-slate-900 text-white hover:bg-slate-800">
+              Connect & Start
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex text-slate-900 font-sans">
@@ -113,9 +162,9 @@ export default function App() {
         </div>
         <div className="mt-auto p-6">
           <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
-            <h4 className="text-sm font-semibold text-slate-900 mb-1">Pro Plan Active</h4>
-            <p className="text-xs text-slate-500 mb-3">AI accountability running 24/7.</p>
-            <Button variant="outline" size="sm" className="w-full text-xs font-medium">Manage</Button>
+            <h4 className="text-sm font-semibold text-slate-900 mb-1">Upgrade to Premium</h4>
+            <p className="text-xs text-slate-500 mb-3">Unlimited AI messages for ₹50.</p>
+            <Button onClick={() => alert("Premium feature is in progress")} variant="outline" size="sm" className="w-full text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 hover:text-white border-0">Upgrade Now</Button>
           </div>
         </div>
       </aside>
